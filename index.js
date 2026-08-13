@@ -18,7 +18,7 @@ app.get("/my-ip", async (req, res) => {
 
 app.post("/create-invoice", async (req, res) => {
   try {
-    const { amount, order_id } = req.body;
+    const { amount, order_id, use_md5 } = req.body;
 
     if (!amount || !order_id) {
       return res.status(400).json({ status: false, message: "Parâmetros obrigatórios ausentes." });
@@ -28,28 +28,23 @@ app.post("/create-invoice", async (req, res) => {
     const TOKEN = (process.env.ZEROCRYPTO_TOKEN || "").trim();
     const SECRET = (process.env.ZEROCRYPTO_SECRET || "").trim();
 
-    // Formatações possíveis para teste
-    const formattedAmount = Number(amount).toFixed(2);
+    const formattedAmount = String(amount);
+    const rawString = formattedAmount + SECRET + order_id + LOGIN;
 
-    // Variação 1: sha256(AMOUNT + SECRET + ORDER_ID + LOGIN)
-    const rawString1 = formattedAmount + SECRET + order_id + LOGIN;
-    const sign1 = crypto.createHash("sha256").update(rawString1).digest("hex");
+    // Se enviado 'use_md5: true', gera MD5. Caso contrário, SHA256.
+    const algorithm = use_md5 ? "md5" : "sha256";
+    const sign = crypto.createHash(algorithm).update(rawString).digest("hex");
 
-    // Print no console do Render para depuração
     console.log("=== DEBUG ZEROCRYPTO ===");
-    console.log("LOGIN:", LOGIN);
-    console.log("TOKEN:", TOKEN ? TOKEN.substring(0, 5) + "..." : "VAZIO");
-    console.log("SECRET:", SECRET ? SECRET.substring(0, 5) + "..." : "VAZIO");
-    console.log("ORDER_ID:", order_id);
-    console.log("AMOUNT:", formattedAmount);
-    console.log("RAW STRING 1:", rawString1);
-    console.log("SIGN GENERATED:", sign1);
+    console.log("ALGORITMO USADO:", algorithm);
+    console.log("RAW STRING:", rawString);
+    console.log("SIGN GENERATED:", sign);
     console.log("========================");
 
     const formData = new URLSearchParams();
     formData.append("amount", formattedAmount);
     formData.append("token", TOKEN);
-    formData.append("sign", sign1);
+    formData.append("sign", sign);
     formData.append("login", LOGIN);
     formData.append("order_id", String(order_id));
 

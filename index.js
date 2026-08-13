@@ -29,45 +29,44 @@ app.post("/create-invoice", async (req, res) => {
     const SECRET = (process.env.ZEROCRYPTO_SECRET || "").trim();
 
     const formattedAmount = Number(amount).toFixed(2);
-    const rawString = formattedAmount + SECRET + order_id + LOGIN;
 
-    // Gerando as hashes
-    const sha256Lower = crypto.createHash("sha256").update(rawString).digest("hex");
-    const sha256Upper = sha256Lower.toUpperCase();
-
-    // Variações de envio do POST
-    const attempts = [
+    // Bateria de variações de montagem de Hash
+    const hashVariations = [
       {
-        name: "Envio com Token do painel + Hash Minúscula",
-        sendToken: TOKEN,
-        sign: sha256Lower
+        name: "1. Usando TOKEN em vez de SECRET (amount + TOKEN + order_id + login)",
+        raw: formattedAmount + TOKEN + order_id + LOGIN
       },
       {
-        name: "Envio com Secret do painel no campo Token + Hash Minúscula",
-        sendToken: SECRET,
-        sign: sha256Lower
+        name: "2. Ordem: login + secret + order_id + amount",
+        raw: LOGIN + SECRET + order_id + formattedAmount
       },
       {
-        name: "Envio com Token do painel + Hash Maiúscula",
-        sendToken: TOKEN,
-        sign: sha256Upper
+        name: "3. Ordem: order_id + amount + secret + login",
+        raw: order_id + formattedAmount + SECRET + LOGIN
       },
       {
-        name: "Envio com Secret do painel no campo Token + Hash Maiúscula",
-        sendToken: SECRET,
-        sign: sha256Upper
+        name: "4. Ordem: token + secret + amount + order_id",
+        raw: TOKEN + SECRET + formattedAmount + order_id
+      },
+      {
+        name: "5. Sem casas decimais com SECRET (ex: 2.31 -> 2.31 / sem toFixed se for numero exato)",
+        raw: amount + SECRET + order_id + LOGIN
       }
     ];
 
     let lastData = null;
 
-    for (const item of attempts) {
+    for (const item of hashVariations) {
+      const sign = crypto.createHash("sha256").update(item.raw).digest("hex");
+
       console.log(`=== TESTANDO: ${item.name} ===`);
+      console.log("RAW:", item.raw);
+      console.log("SIGN:", sign);
 
       const formData = new URLSearchParams();
       formData.append("amount", formattedAmount);
-      formData.append("token", item.sendToken);
-      formData.append("sign", item.sign);
+      formData.append("token", TOKEN);
+      formData.append("sign", sign);
       formData.append("login", LOGIN);
       formData.append("order_id", String(order_id));
 
@@ -87,7 +86,7 @@ app.post("/create-invoice", async (req, res) => {
       }
 
       if (lastData && (lastData.status === true || lastData.url_to_pay)) {
-        console.log(`>>> SUCESSO! APROVADO COM: ${item.name} <<<`);
+        console.log(`>>> SUCESSO ABSOLUTO! FUNCIONOU COM: ${item.name} <<<`);
         return res.json(lastData);
       }
     }

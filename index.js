@@ -30,54 +30,36 @@ app.post("/create-invoice", async (req, res) => {
 
     const formattedAmount = Number(amount).toFixed(2);
 
-    // Monta os 3 formatos possíveis de string de assinatura
-    const combinations = [
-      { name: "Variante 1 (Standard)", raw: formattedAmount + SECRET + order_id + LOGIN },
-      { name: "Variante 2 (No OrderID)", raw: formattedAmount + SECRET + LOGIN },
-      { name: "Variante 3 (Login antes do OrderID)", raw: formattedAmount + SECRET + LOGIN + order_id }
-    ];
+    // Concatenação exigida: AMOUNT + SECRET_KEY + ORDER_ID + LOGIN
+    const rawString = formattedAmount + SECRET + order_id + LOGIN;
+    const sign = crypto.createHash("sha256").update(rawString).digest("hex");
 
-    let lastResult = null;
+    console.log("=== REQUISIÇÃO ZEROCRYPTO ===");
+    console.log("RAW STRING:", rawString);
+    console.log("SIGN:", sign);
 
-    for (const combo of combinations) {
-      // Gera SHA256
-      const sign = crypto.createHash("sha256").update(combo.raw).digest("hex");
+    const formData = new URLSearchParams();
+    formData.append("amount", formattedAmount);
+    formData.append("token", TOKEN);
+    formData.append("sign", sign);
+    formData.append("login", LOGIN);
+    formData.append("order_id", String(order_id));
 
-      console.log(`=== TESTANDO ${combo.name} ===`);
-      console.log("RAW STRING:", combo.raw);
-      console.log("SIGN:", sign);
+    const response = await fetch("https://zerocryptopay.com/pay/newtrack", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formData.toString()
+    });
 
-      const formData = new URLSearchParams();
-      formData.append("amount", formattedAmount);
-      formData.append("token", TOKEN);
-      formData.append("sign", sign);
-      formData.append("login", LOGIN);
-      formData.append("order_id", String(order_id));
+    const text = await response.text();
+    console.log("RESPOSTA ZEROCRYPTO:", text);
 
-      const response = await fetch("https://zerocryptopay.com/pay/newtrack", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: formData.toString()
-      });
-
-      const text = await response.text();
-      console.log("RESPOSTA ZEROCRYPTO:", text);
-
-      try {
-        lastResult = JSON.parse(text);
-      } catch (_e) {
-        lastResult = { status: false, message: text };
-      }
-
-      // Se deu sucesso (status: true) ou retornou a URL de pagamento, encerra o loop e responde!
-      if (lastResult && (lastResult.status === true || lastResult.url_to_pay)) {
-        console.log(`SUCESSO ENCONTRADO NA ${combo.name}!`);
-        return res.json(lastResult);
-      }
+    try {
+      const data = JSON.parse(text);
+      res.json(data);
+    } catch (_e) {
+      res.status(400).json({ status: false, message: "Erro ZeroCrypto: " + text });
     }
-
-    // Se nenhuma combinação passou, retorna o último resultado
-    return res.json(lastResult);
 
   } catch (error) {
     console.error("ERRO NO PROXY:", error);

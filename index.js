@@ -30,36 +30,65 @@ app.post("/create-invoice", async (req, res) => {
 
     const formattedAmount = Number(amount).toFixed(2);
 
-    // Concatenação exigida: AMOUNT + SECRET_KEY + ORDER_ID + LOGIN
-    const rawString = formattedAmount + SECRET + order_id + LOGIN;
-    const sign = crypto.createHash("sha256").update(rawString).digest("hex");
+    // Variações de teste
+    const tests = [
+      {
+        name: "SHA256 Padrão (5.77)",
+        amt: formattedAmount,
+        algo: "sha256"
+      },
+      {
+        name: "MD5 Padrão (5.77)",
+        amt: formattedAmount,
+        algo: "md5"
+      },
+      {
+        name: "SHA256 sem Ponto (ex: 577)",
+        amt: String(Math.round(Number(amount) * 100)),
+        algo: "sha256"
+      }
+    ];
 
-    console.log("=== REQUISIÇÃO ZEROCRYPTO ===");
-    console.log("RAW STRING:", rawString);
-    console.log("SIGN:", sign);
+    let lastData = null;
 
-    const formData = new URLSearchParams();
-    formData.append("amount", formattedAmount);
-    formData.append("token", TOKEN);
-    formData.append("sign", sign);
-    formData.append("login", LOGIN);
-    formData.append("order_id", String(order_id));
+    for (const t of tests) {
+      const rawString = t.amt + SECRET + order_id + LOGIN;
+      const sign = crypto.createHash(t.algo).update(rawString).digest("hex");
 
-    const response = await fetch("https://zerocryptopay.com/pay/newtrack", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: formData.toString()
-    });
+      console.log(`=== TESTANDO: ${t.name} ===`);
+      console.log("RAW STRING:", rawString);
+      console.log("SIGN:", sign);
 
-    const text = await response.text();
-    console.log("RESPOSTA ZEROCRYPTO:", text);
+      const formData = new URLSearchParams();
+      formData.append("amount", formattedAmount); // No formulário mantém o valor normal
+      formData.append("token", TOKEN);
+      formData.append("sign", sign);
+      formData.append("login", LOGIN);
+      formData.append("order_id", String(order_id));
 
-    try {
-      const data = JSON.parse(text);
-      res.json(data);
-    } catch (_e) {
-      res.status(400).json({ status: false, message: "Erro ZeroCrypto: " + text });
+      const response = await fetch("https://zerocryptopay.com/pay/newtrack", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData.toString()
+      });
+
+      const text = await response.text();
+      console.log("RESPOSTA ZEROCRYPTO:", text);
+
+      try {
+        lastData = JSON.parse(text);
+      } catch (_e) {
+        lastData = { status: false, message: text };
+      }
+
+      // Se der certo, interrompe o loop e devolve
+      if (lastData && (lastData.status === true || lastData.url_to_pay)) {
+        console.log(`>>> SUCESSO NO TESTE: ${t.name} <<<`);
+        return res.json(lastData);
+      }
     }
+
+    return res.json(lastData);
 
   } catch (error) {
     console.error("ERRO NO PROXY:", error);

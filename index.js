@@ -6,6 +6,7 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+// Rota auxiliar do IP
 app.get("/my-ip", async (req, res) => {
   try {
     const response = await fetch("https://api.ipify.org?format=json");
@@ -16,6 +17,7 @@ app.get("/my-ip", async (req, res) => {
   }
 });
 
+// Rota para criar fatura
 app.post("/create-invoice", async (req, res) => {
   try {
     const { amount, order_id } = req.body;
@@ -28,56 +30,40 @@ app.post("/create-invoice", async (req, res) => {
     const TOKEN = (process.env.ZEROCRYPTO_TOKEN || "").trim();
     const SECRET = (process.env.ZEROCRYPTO_SECRET || "").trim();
 
-    const formattedAmount = Number(amount).toFixed(2);
-    const rawString = formattedAmount + SECRET + order_id + LOGIN;
+    // Mantém o amount no formato original exatamente como enviado (string/número simples)
+    const amountStr = String(amount);
+    const orderIdStr = String(order_id);
 
-    // 1. SHA-256 Padrão
-    const sha256Sign = crypto.createHash("sha256").update(rawString).digest("hex");
+    // sha256(AMOUNT + SECRET_KEY + ORDER_ID + LOGIN)
+    const rawString = amountStr + SECRET + orderIdStr + LOGIN;
+    const sign = crypto.createHash("sha256").update(rawString).digest("hex");
 
-    // 2. HMAC-SHA256 (usando a Secret como chave)
-    const hmacString = formattedAmount + order_id + LOGIN;
-    const hmacSign = crypto.createHmac("sha256", SECRET).update(hmacString).digest("hex");
+    console.log("=== ENVIANDO REQUISIÇÃO (DOC OFICIAL) ===");
+    console.log("RAW STRING:", rawString);
+    console.log("SIGN:", sign);
 
-    const attempts = [
-      { name: "SHA256 Concatenação Direta", sign: sha256Sign },
-      { name: "HMAC-SHA256", sign: hmacSign }
-    ];
+    const formData = new URLSearchParams();
+    formData.append("amount", amountStr);
+    formData.append("token", TOKEN);
+    formData.append("sign", sign);
+    formData.append("login", LOGIN);
+    formData.append("order_id", orderIdStr);
 
-    let lastData = null;
+    const response = await fetch("https://zerocryptopay.com/pay/newtrack", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formData.toString()
+    });
 
-    for (const item of attempts) {
-      console.log(`=== TESTANDO: ${item.name} ===`);
-      console.log("SIGN:", item.sign);
+    const text = await response.text();
+    console.log("RESPOSTA ZEROCRYPTO:", text);
 
-      const formData = new URLSearchParams();
-      formData.append("amount", formattedAmount);
-      formData.append("token", TOKEN);
-      formData.append("sign", item.sign);
-      formData.append("login", LOGIN);
-      formData.append("order_id", String(order_id));
-
-      const response = await fetch("https://zerocryptopay.com/pay/newtrack", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: formData.toString()
-      });
-
-      const text = await response.text();
-      console.log("RESPOSTA ZEROCRYPTO:", text);
-
-      try {
-        lastData = JSON.parse(text);
-      } catch (_e) {
-        lastData = { status: false, message: text };
-      }
-
-      if (lastData && (lastData.status === true || lastData.url_to_pay)) {
-        console.log(`>>> SUCESSO APROVADO COM: ${item.name} <<<`);
-        return res.json(lastData);
-      }
+    try {
+      const data = JSON.parse(text);
+      res.json(data);
+    } catch (_e) {
+      res.status(400).json({ status: false, message: "Erro ZeroCrypto: " + text });
     }
-
-    return res.json(lastData);
 
   } catch (error) {
     console.error("ERRO NO PROXY:", error);

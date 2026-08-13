@@ -41,12 +41,15 @@ app.post("/create-invoice", async (req, res) => {
     const rawString = amountStr + SECRET + orderIdStr + LOGIN;
     const sign = crypto.createHash("sha256").update(rawString).digest("hex");
 
-    // URL do Webhook que vai processar a entrega no Supabase
-    const webhookUrl = `${SUPABASE_PROJECT_URL}/functions/v1/zerocrypto-webhook`;
+    // Aponta a notificação para a rota /webhook do próprio Render (para capturar e repassar garantido)
+    const renderHost = req.headers.host ? `https://${req.headers.host}` : null;
+    const webhookUrl = renderHost 
+      ? `${renderHost}/webhook` 
+      : `${SUPABASE_PROJECT_URL}/functions/v1/zerocrypto-webhook`;
 
     console.log("=== ENVIANDO PARA ZEROCRYPTO ===");
     console.log("Order ID Real:", orderIdStr);
-    console.log("Webhook Callback:", webhookUrl);
+    console.log("Webhook Callback Registrado:", webhookUrl);
 
     const formData = new URLSearchParams();
     formData.append("amount", amountStr);
@@ -56,9 +59,13 @@ app.post("/create-invoice", async (req, res) => {
     formData.append("login", LOGIN);
     formData.append("order_id", orderIdStr);
     
-    // Injeta a URL do webhook no payload para garantir
+    // Envia todas as possíveis variações do parâmetro de webhook que o gateway possa ler
     formData.append("url_callback", webhookUrl);
     formData.append("callback_url", webhookUrl);
+    formData.append("webhook_url", webhookUrl);
+    formData.append("webhook", webhookUrl);
+    formData.append("url_return", webhookUrl);
+    formData.append("url_result", webhookUrl);
 
     const response = await fetch("https://zerocryptopay.com/pay/newtrack", {
       method: "POST",
@@ -82,21 +89,33 @@ app.post("/create-invoice", async (req, res) => {
   }
 });
 
-// 2. ROTA DE WEBHOOK (REPASSE PARA O SUPABASE)
-// Caso o ZeroCryptoPay notifique diretamente o Render, este repassa o aviso pro Supabase
-app.post("/webhook", async (req, res) => {
+// 2. ROTA DE WEBHOOK (RECEBE DO ZEROCRYPTO E REPASSA LIMPO PARA O SUPABASE)
+app.use("/webhook", async (req, res) => {
   try {
     const SUPABASE_PROJECT_URL = (process.env.SUPABASE_URL || "https://SEU_PROJETO.supabase.co").trim();
     const targetUrl = `${SUPABASE_PROJECT_URL}/functions/v1/zerocrypto-webhook`;
 
-    console.log("Webhook recebido no Render! Repassando para:", targetUrl);
+    console.log("=== WEBHOOK RECEBIDO NO RENDER ===");
+    console.log("Método:", req.method);
+    console.log("Headers:", JSON.stringify(req.headers));
+    console.log("Body Recebido:", JSON.stringify(req.body));
+    console.log("Query String:", JSON.stringify(req.query));
 
+    // Consolida Body e Query Params em um objeto só
+    let payload = req.body || {};
+    if (req.query && Object.keys(req.query).length > 0) {
+      payload = { ...payload, ...req.query };
+    }
+
+    console.log("Repassando para Supabase Edge Function:", targetUrl);
+
+    // Dispara o evento direto para o Supabase
     const response = await fetch(targetUrl, {
       method: "POST",
       headers: {
-        "Content-Type": req.headers["content-type"] || "application/json"
+        "Content-Type": "application/json"
       },
-      body: typeof req.body === "string" ? req.body : JSON.stringify(req.body)
+      body: JSON.stringify(payload)
     });
 
     const responseData = await response.text();
@@ -106,7 +125,7 @@ app.post("/webhook", async (req, res) => {
 
   } catch (error) {
     console.error("Erro ao repassar Webhook no Render:", error);
-    res.status(500).send("Internal Error");
+    res.status(500).send("Internal Error: " + error.message);
   }
 });
 

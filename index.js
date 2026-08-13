@@ -18,7 +18,7 @@ app.get("/my-ip", async (req, res) => {
 
 app.post("/create-invoice", async (req, res) => {
   try {
-    const { amount, order_id, use_md5 } = req.body;
+    const { amount, order_id } = req.body;
 
     if (!amount || !order_id) {
       return res.status(400).json({ status: false, message: "Parâmetros obrigatórios ausentes." });
@@ -28,41 +28,70 @@ app.post("/create-invoice", async (req, res) => {
     const TOKEN = (process.env.ZEROCRYPTO_TOKEN || "").trim();
     const SECRET = (process.env.ZEROCRYPTO_SECRET || "").trim();
 
-    const formattedAmount = String(amount);
+    // Garante valor numérico com 2 casas decimais (ex: "3.08")
+    const formattedAmount = Number(amount).toFixed(2);
     const rawString = formattedAmount + SECRET + order_id + LOGIN;
 
-    // Se enviado 'use_md5: true', gera MD5. Caso contrário, SHA256.
-    const algorithm = use_md5 ? "md5" : "sha256";
-    const sign = crypto.createHash(algorithm).update(rawString).digest("hex");
+    // 1. Tenta primeira tentativa com MD5
+    let sign = crypto.createHash("md5").update(rawString).digest("hex");
+    let algorithmUsed = "md5";
 
-    console.log("=== DEBUG ZEROCRYPTO ===");
-    console.log("ALGORITMO USADO:", algorithm);
-    console.log("RAW STRING:", rawString);
-    console.log("SIGN GENERATED:", sign);
-    console.log("========================");
-
-    const formData = new URLSearchParams();
+    let formData = new URLSearchParams();
     formData.append("amount", formattedAmount);
     formData.append("token", TOKEN);
     formData.append("sign", sign);
     formData.append("login", LOGIN);
     formData.append("order_id", String(order_id));
 
-    const response = await fetch("https://zerocryptopay.com/pay/newtrack", {
+    console.log("=== TENTATIVA 1: MD5 ===");
+    console.log("RAW STRING:", rawString);
+    console.log("SIGN (MD5):", sign);
+
+    let response = await fetch("https://zerocryptopay.com/pay/newtrack", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: formData.toString()
     });
 
-    const text = await response.text();
-    console.log("RESPOSTA CRUA DO ZEROCRYPTO:", text);
+    let text = await response.text();
+    let data;
 
     try {
-      const data = JSON.parse(text);
-      res.json(data);
+      data = JSON.parse(text);
     } catch (_e) {
-      res.status(400).json({ status: false, message: "Erro ZeroCrypto: " + text });
+      data = null;
     }
+
+    // 2. Se MD5 falhar por assinatura inválida (error_code 11), tenta SHA256
+    if (data && !data.status && data.error_code === 11) {
+      console.log("MD5 recusado. Tentando SHA256...");
+      sign = crypto.createHash("sha256").update(rawString).digest("hex");
+      algorithmUsed = "sha256";
+
+      formData = new URLSearchParams();
+      formData.append("amount", formattedAmount);
+      formData.append("token", TOKEN);
+      formData.append("sign", sign);
+      formData.append("login", LOGIN);
+      formData.append("order_id", String(order_id));
+
+      response = await fetch("https://zerocryptopay.com/pay/newtrack", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData.toString()
+      });
+
+      text = await response.text();
+      try {
+        data = JSON.parse(text);
+      } catch (_e) {
+        data = { status: false, message: text };
+      }
+    }
+
+    console.log(`RESPOSTA FINAL ZEROCRYPTO (${algorithmUsed}):`, text);
+    res.json(data);
+
   } catch (error) {
     console.error("ERRO NO PROXY:", error);
     res.status(500).json({ status: false, message: error.message });

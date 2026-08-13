@@ -6,7 +6,6 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Rota auxiliar do IP
 app.get("/my-ip", async (req, res) => {
   try {
     const response = await fetch("https://api.ipify.org?format=json");
@@ -17,7 +16,6 @@ app.get("/my-ip", async (req, res) => {
   }
 });
 
-// Rota para criar fatura
 app.post("/create-invoice", async (req, res) => {
   try {
     const { amount, order_id } = req.body;
@@ -30,15 +28,14 @@ app.post("/create-invoice", async (req, res) => {
     const TOKEN = (process.env.ZEROCRYPTO_TOKEN || "").trim();
     const SECRET = (process.env.ZEROCRYPTO_SECRET || "").trim();
 
-    // Mantém o amount no formato original exatamente como enviado (string/número simples)
     const amountStr = String(amount);
     const orderIdStr = String(order_id);
 
-    // sha256(AMOUNT + SECRET_KEY + ORDER_ID + LOGIN)
+    // Concatenação oficial: AMOUNT + SECRET_KEY + ORDER_ID + LOGIN
     const rawString = amountStr + SECRET + orderIdStr + LOGIN;
     const sign = crypto.createHash("sha256").update(rawString).digest("hex");
 
-    console.log("=== ENVIANDO REQUISIÇÃO (DOC OFICIAL) ===");
+    console.log("=== ENVIANDO PARA ZEROCRYPTO ===");
     console.log("RAW STRING:", rawString);
     console.log("SIGN:", sign);
 
@@ -46,6 +43,7 @@ app.post("/create-invoice", async (req, res) => {
     formData.append("amount", amountStr);
     formData.append("token", TOKEN);
     formData.append("sign", sign);
+    formData.append("signature", sign); // Envia ambos para evitar divergência de nome de campo
     formData.append("login", LOGIN);
     formData.append("order_id", orderIdStr);
 

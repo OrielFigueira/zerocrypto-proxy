@@ -29,40 +29,45 @@ app.post("/create-invoice", async (req, res) => {
     const SECRET = (process.env.ZEROCRYPTO_SECRET || "").trim();
 
     const formattedAmount = Number(amount).toFixed(2);
+    const rawString = formattedAmount + SECRET + order_id + LOGIN;
 
-    // Variações de teste
-    const tests = [
+    // Gerando as hashes
+    const sha256Lower = crypto.createHash("sha256").update(rawString).digest("hex");
+    const sha256Upper = sha256Lower.toUpperCase();
+
+    // Variações de envio do POST
+    const attempts = [
       {
-        name: "SHA256 Padrão (5.77)",
-        amt: formattedAmount,
-        algo: "sha256"
+        name: "Envio com Token do painel + Hash Minúscula",
+        sendToken: TOKEN,
+        sign: sha256Lower
       },
       {
-        name: "MD5 Padrão (5.77)",
-        amt: formattedAmount,
-        algo: "md5"
+        name: "Envio com Secret do painel no campo Token + Hash Minúscula",
+        sendToken: SECRET,
+        sign: sha256Lower
       },
       {
-        name: "SHA256 sem Ponto (ex: 577)",
-        amt: String(Math.round(Number(amount) * 100)),
-        algo: "sha256"
+        name: "Envio com Token do painel + Hash Maiúscula",
+        sendToken: TOKEN,
+        sign: sha256Upper
+      },
+      {
+        name: "Envio com Secret do painel no campo Token + Hash Maiúscula",
+        sendToken: SECRET,
+        sign: sha256Upper
       }
     ];
 
     let lastData = null;
 
-    for (const t of tests) {
-      const rawString = t.amt + SECRET + order_id + LOGIN;
-      const sign = crypto.createHash(t.algo).update(rawString).digest("hex");
-
-      console.log(`=== TESTANDO: ${t.name} ===`);
-      console.log("RAW STRING:", rawString);
-      console.log("SIGN:", sign);
+    for (const item of attempts) {
+      console.log(`=== TESTANDO: ${item.name} ===`);
 
       const formData = new URLSearchParams();
-      formData.append("amount", formattedAmount); // No formulário mantém o valor normal
-      formData.append("token", TOKEN);
-      formData.append("sign", sign);
+      formData.append("amount", formattedAmount);
+      formData.append("token", item.sendToken);
+      formData.append("sign", item.sign);
       formData.append("login", LOGIN);
       formData.append("order_id", String(order_id));
 
@@ -81,9 +86,8 @@ app.post("/create-invoice", async (req, res) => {
         lastData = { status: false, message: text };
       }
 
-      // Se der certo, interrompe o loop e devolve
       if (lastData && (lastData.status === true || lastData.url_to_pay)) {
-        console.log(`>>> SUCESSO NO TESTE: ${t.name} <<<`);
+        console.log(`>>> SUCESSO! APROVADO COM: ${item.name} <<<`);
         return res.json(lastData);
       }
     }

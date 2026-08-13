@@ -29,44 +29,30 @@ app.post("/create-invoice", async (req, res) => {
     const SECRET = (process.env.ZEROCRYPTO_SECRET || "").trim();
 
     const formattedAmount = Number(amount).toFixed(2);
+    const rawString = formattedAmount + SECRET + order_id + LOGIN;
 
-    // Bateria de variações de montagem de Hash
-    const hashVariations = [
-      {
-        name: "1. Usando TOKEN em vez de SECRET (amount + TOKEN + order_id + login)",
-        raw: formattedAmount + TOKEN + order_id + LOGIN
-      },
-      {
-        name: "2. Ordem: login + secret + order_id + amount",
-        raw: LOGIN + SECRET + order_id + formattedAmount
-      },
-      {
-        name: "3. Ordem: order_id + amount + secret + login",
-        raw: order_id + formattedAmount + SECRET + LOGIN
-      },
-      {
-        name: "4. Ordem: token + secret + amount + order_id",
-        raw: TOKEN + SECRET + formattedAmount + order_id
-      },
-      {
-        name: "5. Sem casas decimais com SECRET (ex: 2.31 -> 2.31 / sem toFixed se for numero exato)",
-        raw: amount + SECRET + order_id + LOGIN
-      }
+    // 1. SHA-256 Padrão
+    const sha256Sign = crypto.createHash("sha256").update(rawString).digest("hex");
+
+    // 2. HMAC-SHA256 (usando a Secret como chave)
+    const hmacString = formattedAmount + order_id + LOGIN;
+    const hmacSign = crypto.createHmac("sha256", SECRET).update(hmacString).digest("hex");
+
+    const attempts = [
+      { name: "SHA256 Concatenação Direta", sign: sha256Sign },
+      { name: "HMAC-SHA256", sign: hmacSign }
     ];
 
     let lastData = null;
 
-    for (const item of hashVariations) {
-      const sign = crypto.createHash("sha256").update(item.raw).digest("hex");
-
+    for (const item of attempts) {
       console.log(`=== TESTANDO: ${item.name} ===`);
-      console.log("RAW:", item.raw);
-      console.log("SIGN:", sign);
+      console.log("SIGN:", item.sign);
 
       const formData = new URLSearchParams();
       formData.append("amount", formattedAmount);
       formData.append("token", TOKEN);
-      formData.append("sign", sign);
+      formData.append("sign", item.sign);
       formData.append("login", LOGIN);
       formData.append("order_id", String(order_id));
 
@@ -86,7 +72,7 @@ app.post("/create-invoice", async (req, res) => {
       }
 
       if (lastData && (lastData.status === true || lastData.url_to_pay)) {
-        console.log(`>>> SUCESSO ABSOLUTO! FUNCIONOU COM: ${item.name} <<<`);
+        console.log(`>>> SUCESSO APROVADO COM: ${item.name} <<<`);
         return res.json(lastData);
       }
     }

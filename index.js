@@ -30,12 +30,15 @@ app.post("/create-invoice", async (req, res) => {
     const TOKEN = process.env.ZEROCRYPTO_TOKEN;
     const SECRET = process.env.ZEROCRYPTO_SECRET;
 
-    const formattedAmount = String(amount);
+    // Força a formatação com 2 casas decimais (ex: 15.00)
+    const formattedAmount = Number(amount).toFixed(2);
 
-    // Assinatura SHA256 exigida pela API: sha256(AMOUNT + SECRET_KEY + ORDER_ID + LOGIN)
+    // Assinatura SHA256: sha256(AMOUNT + SECRET_KEY + ORDER_ID + LOGIN)
+    const rawString = formattedAmount + SECRET + order_id + LOGIN;
+
     const sign = crypto
       .createHash("sha256")
-      .update(formattedAmount + SECRET + order_id + LOGIN)
+      .update(rawString)
       .digest("hex");
 
     const formData = new URLSearchParams();
